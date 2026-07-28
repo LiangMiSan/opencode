@@ -12,6 +12,10 @@ on:
           - dev
           - beta
           - prod
+      version:
+        description: "Version override (optional, e.g. 1.18.6). Empty = dev/beta use '0.0.0-<channel>-<timestamp>', prod fetches npm latest and bumps patch."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
         run: bun ./scripts/prepare.ts
         env:
           OPENCODE_CHANNEL: ${{ inputs.channel }}
+          OPENCODE_VERSION: ${{ inputs.version }}
 
       - name: Build (electron-vite)
         working-directory: packages/desktop
