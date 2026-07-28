@@ -25,6 +25,7 @@ import {
   isFirstLaunchOnboardingPending,
   isOldLayoutEligible,
 } from "./onboarding"
+import { applyProxyConfig, getProxyConfig } from "./proxy"
 import {
   getDefaultServerUrl,
   preferAppEnv,
@@ -188,6 +189,9 @@ const main = Effect.gen(function* () {
 
   ensureLoopbackNoProxy()
   useEnvProxy()
+  applyProxyConfig(getProxyConfig()).catch((error) => {
+    logger.warn("failed to apply proxy config at startup", error)
+  })
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)

@@ -1,6 +1,20 @@
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { WslServersPlatform } from "@opencode-ai/app/wsl/types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+
+export type ProxyMode = "none" | "system" | "custom"
+
+export interface CustomProxyConfig {
+  url: string
+  bypassList?: string[]
+  username?: string
+  password?: string
+}
+
+export interface ProxyConfig {
+  mode: ProxyMode
+  custom?: CustomProxyConfig | null
+}
 export type {
   WslDistroProbe,
   WslInstalledDistro,
@@ -101,6 +115,9 @@ export type ElectronAPI = {
   getPinchZoomEnabled: () => Promise<boolean>
   setPinchZoomEnabled: (enabled: boolean) => Promise<void>
   onPinchZoomEnabledChanged: (cb: (enabled: boolean) => void) => () => void
+  getProxyConfig: () => Promise<ProxyConfig>
+  setProxyConfig: (config: ProxyConfig) => Promise<{ needsRestart: boolean }>
+  onProxyConfigChanged: (cb: (config: ProxyConfig) => void) => () => void
   onZoomFactorChanged: (cb: (factor: number) => void) => () => void
   setTitlebar: (theme: TitlebarTheme) => Promise<void>
   runDesktopMenuAction: (action: DesktopMenuAction) => Promise<void>

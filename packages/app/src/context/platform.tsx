@@ -19,6 +19,22 @@ type SaveFilePickerOptions = { title?: string; defaultPath?: string }
 type PlatformName = "web" | "desktop"
 type DesktopOS = "macos" | "windows" | "linux"
 
+export type ProxyMode = "none" | "system" | "custom"
+
+export interface CustomProxyConfig {
+  url: string
+  bypassList?: string[]
+  username?: string
+  password?: string
+}
+
+export interface ProxyConfig {
+  mode: ProxyMode
+  custom?: CustomProxyConfig | null
+}
+
+export type SetProxyResult = { needsRestart: boolean }
+
 export type FatalRendererErrorLog = {
   error: string
   url: string
@@ -105,6 +121,15 @@ type PlatformBase = {
 
   /** Allow native pinch/Ctrl-scroll zoom gestures (desktop only) */
   setPinchZoomEnabled?(enabled: boolean): Promise<void> | void
+
+  /** Get the current proxy configuration (desktop only) */
+  getProxyConfig?(): Promise<ProxyConfig> | ProxyConfig
+
+  /** Apply a new proxy configuration; resolves with whether an app restart is required (desktop only) */
+  setProxyConfig?(config: ProxyConfig): Promise<SetProxyResult> | SetProxyResult
+
+  /** Subscribe to proxy configuration changes from the main process (desktop only) */
+  onProxyConfigChanged?(cb: (config: ProxyConfig) => void): () => void
 
   /** Run a desktop-only menu action from the app chrome */
   runDesktopMenuAction?(action: DesktopMenuAction): Promise<void> | void

@@ -29,6 +29,7 @@ import { Link } from "../link"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { LayoutRetirementNotice, LayoutTransitionToggle } from "./interface-transition"
+import { SettingsProxySection } from "./proxy"
 import "./settings-v2.css"
 
 let demoSoundState = {
@@ -715,6 +716,10 @@ export const SettingsGeneralV2: Component<{
         </Show>
 
         <DisplaySection />
+
+        <Show when={desktop()}>
+          <SettingsProxySection />
+        </Show>
 
         <AdvancedSection />
       </div>

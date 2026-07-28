@@ -13,6 +13,7 @@ import { getStore, removeStoreFileIfEmpty } from "./store"
 import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
+import { applyProxyConfig, getProxyConfig, isProxyConfigEqual, setProxyConfig, type ProxyConfig } from "./proxy"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -256,6 +257,22 @@ export function registerIpcHandlers(deps: Deps) {
   ipcMain.handle("get-pinch-zoom-enabled", () => getPinchZoomEnabled())
   ipcMain.handle("set-pinch-zoom-enabled", (_event: IpcMainInvokeEvent, enabled: boolean) => {
     setPinchZoomEnabled(enabled)
+  })
+  ipcMain.handle("get-proxy-config", () => getProxyConfig())
+  ipcMain.handle("set-proxy-config", async (_event: IpcMainInvokeEvent, config: ProxyConfig) => {
+    const previous = getProxyConfig()
+    setProxyConfig(config)
+    let needsRestart = false
+    try {
+      await applyProxyConfig(config)
+      needsRestart = !isProxyConfigEqual(previous, config)
+    } catch (error) {
+      console.warn("failed to apply proxy config", error)
+    }
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send("proxy-config-changed", config)
+    }
+    return { needsRestart }
   })
   ipcMain.handle("set-titlebar", (event: IpcMainInvokeEvent, theme: TitlebarTheme) => {
     const win = BrowserWindow.fromWebContents(event.sender)

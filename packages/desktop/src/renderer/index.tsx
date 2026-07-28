@@ -301,6 +301,12 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     setPinchZoomEnabled,
 
+    getProxyConfig: () => window.api.getProxyConfig(),
+
+    setProxyConfig: (config) => window.api.setProxyConfig(config),
+
+    onProxyConfigChanged: (cb) => window.api.onProxyConfigChanged(cb),
+
     runDesktopMenuAction,
 
     checkAppExists: async (appName: string) => {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
-import type { ElectronAPI, WslServersEvent } from "./types"
+import type { ElectronAPI, ProxyConfig, WslServersEvent } from "./types"
 import type { UpdaterState } from "@opencode-ai/app/updater"
 
 const updaterCallbacks = new Set<(state: UpdaterState) => void>()
@@ -117,6 +117,13 @@ const api: ElectronAPI = {
     const handler = (_: unknown, enabled: boolean) => cb(enabled)
     ipcRenderer.on("pinch-zoom-enabled-changed", handler)
     return () => ipcRenderer.removeListener("pinch-zoom-enabled-changed", handler)
+  },
+  getProxyConfig: () => ipcRenderer.invoke("get-proxy-config"),
+  setProxyConfig: (config: ProxyConfig) => ipcRenderer.invoke("set-proxy-config", config),
+  onProxyConfigChanged: (cb) => {
+    const handler = (_: unknown, config: ProxyConfig) => cb(config)
+    ipcRenderer.on("proxy-config-changed", handler)
+    return () => ipcRenderer.removeListener("proxy-config-changed", handler)
   },
   onZoomFactorChanged: (cb) => {
     const handler = (_: unknown, factor: number) => cb(factor)
