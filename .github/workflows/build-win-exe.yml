@@ -1,0 +1,63 @@
+name: build-win-exe
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel (dev/beta/prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - beta
+          - prod
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-win-exe-${{ github.ref }}-${{ inputs.channel }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows exe (${{ inputs.channel }})
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - name: Setup Bun + Node + install deps
+        uses: ./.github/actions/setup-bun
+
+      - name: Prepare (icons + metainfo + opencode node bundle)
+        working-directory: packages/desktop
+        run: bun ./scripts/prepare.ts
+        env:
+          OPENCODE_CHANNEL: ${{ inputs.channel }}
+
+      - name: Build (electron-vite)
+        working-directory: packages/desktop
+        run: bun run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          OPENCODE_CHANNEL: ${{ inputs.channel }}
+
+      - name: Package (electron-builder --win, no signing on fork)
+        working-directory: packages/desktop
+        run: bun run package:win
+        env:
+          OPENCODE_CHANNEL: ${{ inputs.channel }}
+          # signtoolOptions.sign -> sign-windows.ps1 auto-skips when Azure Trusted Signing secrets are absent
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: opencode-desktop-win-x64-${{ inputs.channel }}
+          path: |
+            packages/desktop/dist/*.exe
+            packages/desktop/dist/*.exe.blockmap
+            packages/desktop/dist/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
