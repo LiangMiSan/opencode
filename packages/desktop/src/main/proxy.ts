@@ -103,16 +103,23 @@ async function readWindowsSystemProxy(): Promise<ResolvedProxy> {
     const match = /ProxyServer\s+REG_SZ\s+([^\r\n]+)/.exec(stdout)
     if (!match) return { noProxy: mergeBypassList() }
     const server = match[1].trim()
+    // Registry stores ProxyServer in two formats:
+    //   1. "host:port" — single proxy for all protocols (Windows Settings default)
+    //   2. "http=host:port;https=host:port;ftp=host:port;socks=host:port" — per-protocol (Internet Options)
+    // Splitting on "=" blindly drops format #1 because value is undefined.
     const entries = server.split(";")
     let http: string | undefined
     let https: string | undefined
     for (const entry of entries) {
-      const [scheme, value] = entry.split("=")
-      const trimmed = value?.trim()
+      const trimmed = entry.trim()
       if (!trimmed) continue
-      const url = trimmed.includes("://") ? trimmed : `http://${trimmed}`
-      if (scheme?.toLowerCase() === "https") https = url
-      else if (scheme?.toLowerCase() === "http") http = url
+      const eqIdx = trimmed.indexOf("=")
+      const scheme = eqIdx > 0 ? trimmed.slice(0, eqIdx).toLowerCase() : undefined
+      const valuePart = (eqIdx > 0 ? trimmed.slice(eqIdx + 1) : trimmed).trim()
+      if (!valuePart) continue
+      const url = valuePart.includes("://") ? valuePart : `http://${valuePart}`
+      if (scheme === "https") https = url
+      else if (scheme === "http") http = url
       else if (!http) http = url
     }
     if (http && !https) https = http
@@ -121,7 +128,8 @@ async function readWindowsSystemProxy(): Promise<ResolvedProxy> {
       https,
       noProxy: mergeBypassList(await readWindowsProxyBypass()),
     }
-  } catch {
+  } catch (error) {
+    console.warn("failed to read windows system proxy", error)
     return { noProxy: mergeBypassList() }
   }
 }
@@ -135,7 +143,8 @@ async function readWindowsProxyEnabled(): Promise<boolean> {
       "ProxyEnable",
     ])
     return /ProxyEnable\s+REG_DWORD\s+0x1/i.test(stdout)
-  } catch {
+  } catch (error) {
+    console.warn("failed to read windows ProxyEnable", error)
     return false
   }
 }
@@ -151,22 +160,18 @@ async function readWindowsProxyBypass(): Promise<string[]> {
     const match = /ProxyOverride\s+REG_SZ\s+([^\r\n]+)/.exec(stdout)
     if (!match) return []
     return match[1].split(";").map((v) => v.trim()).filter(Boolean)
-  } catch {
+  } catch (error) {
+    console.warn("failed to read windows ProxyOverride", error)
     return []
   }
 }
 
 export async function buildSessionProxyOptions(config: ProxyConfig): Promise<SessionProxyOptions> {
-  return buildSessionProxyOptionsBase(config, async () => {
-    const resolved = await resolveSystemProxy()
-    const rules = resolved.all ?? resolved.https ?? resolved.http
-    if (!rules) return { mode: "direct" }
-    return {
-      mode: "custom",
-      proxyRules: rules,
-      proxyBypassRules: mergeBypassList(resolved.noProxy).join(","),
-    }
-  })
+  // For system mode, defer to Chromium's native system proxy support. It handles
+  // Windows registry formats, PAC, WPAD, and bypass lists correctly; manual parsing
+  // stays only for seeding HTTP_PROXY env vars for the sidecar process.
+  if (config.mode === "system") return { mode: "system" }
+  return buildSessionProxyOptionsBase(config)
 }
 
 export function applyProxyToSessionSync(options: SessionProxyOptions): Promise<void> {
@@ -222,7 +227,76 @@ export async function applyProxyConfig(config: ProxyConfig): Promise<{
   applyProxyToEnv(resolved)
   const sessionOptions = await buildSessionProxyOptions(config)
   await applyProxyToSessionSync(sessionOptions)
+  lastResolved = config.mode === "system" ? resolved : undefined
   return { session: sessionOptions, resolved }
+}
+
+type ProxyEnvUpdater = (env: Record<string, string>) => void
+
+let sidecarProxyUpdater: ProxyEnvUpdater | undefined
+let watcherTimer: NodeJS.Timeout | undefined
+let lastResolved: ResolvedProxy | undefined
+
+export function setSidecarProxyUpdater(updater: ProxyEnvUpdater | undefined) {
+  sidecarProxyUpdater = updater
+}
+
+function isResolvedEqual(a: ResolvedProxy | undefined, b: ResolvedProxy): boolean {
+  if (!a) return false
+  return (
+    a.http === b.http &&
+    a.https === b.https &&
+    a.all === b.all &&
+    a.noProxy.length === b.noProxy.length &&
+    a.noProxy.every((value, index) => value === b.noProxy[index])
+  )
+}
+
+function buildSidecarProxyEnv(resolved: ResolvedProxy): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(buildEnvVars(resolved))) {
+    env[key] = value ?? ""
+  }
+  return env
+}
+
+async function applyResolvedToProcesses(resolved: ResolvedProxy): Promise<void> {
+  applyProxyToEnv(resolved)
+  await applyProxyToSessionSync({ mode: "system" })
+  sidecarProxyUpdater?.(buildSidecarProxyEnv(resolved))
+}
+
+async function watcherTick(getConfig: () => ProxyConfig): Promise<void> {
+  try {
+    const config = getConfig()
+    if (config.mode !== "system") {
+      lastResolved = undefined
+      return
+    }
+    const resolved = await resolveSystemProxy()
+    if (isResolvedEqual(lastResolved, resolved)) return
+    lastResolved = resolved
+    await applyResolvedToProcesses(resolved)
+  } catch (error) {
+    console.warn("system proxy watcher tick failed", error)
+  }
+}
+
+export function startSystemProxyWatcher(getConfig: () => ProxyConfig, intervalMs = 30_000): void {
+  stopSystemProxyWatcher()
+  const tick = () => {
+    void watcherTick(getConfig)
+  }
+  watcherTimer = setInterval(tick, intervalMs)
+  watcherTimer.unref?.()
+  tick()
+}
+
+export function stopSystemProxyWatcher(): void {
+  if (watcherTimer) {
+    clearInterval(watcherTimer)
+    watcherTimer = undefined
+  }
 }
 
 export { isProxyConfigEqual, isValidProxyUrl } from "./proxy-util"

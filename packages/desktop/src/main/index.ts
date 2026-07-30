@@ -25,7 +25,7 @@ import {
   isFirstLaunchOnboardingPending,
   isOldLayoutEligible,
 } from "./onboarding"
-import { applyProxyConfig, getProxyConfig } from "./proxy"
+import { applyProxyConfig, getProxyConfig, setSidecarProxyUpdater, startSystemProxyWatcher, stopSystemProxyWatcher } from "./proxy"
 import {
   getDefaultServerUrl,
   preferAppEnv,
@@ -88,6 +88,7 @@ async function killSidecar() {
   if (!server) return
   const current = server
   server = null
+  setSidecarProxyUpdater(undefined)
   await current.stop()
 }
 
@@ -189,9 +190,11 @@ const main = Effect.gen(function* () {
 
   ensureLoopbackNoProxy()
   useEnvProxy()
-  applyProxyConfig(getProxyConfig()).catch((error) => {
-    logger.warn("failed to apply proxy config at startup", error)
-  })
+  applyProxyConfig(getProxyConfig())
+    .catch((error) => {
+      logger.warn("failed to apply proxy config at startup", error)
+    })
+    .finally(() => startSystemProxyWatcher(getProxyConfig))
   app.commandLine.appendSwitch("proxy-bypass-list", "<-loopback>")
   const features = app.commandLine.getSwitchValue("enable-features")
   app.commandLine.appendSwitch("enable-features", features ? `${jsCallStackFeature},${features}` : jsCallStackFeature)
@@ -225,11 +228,13 @@ const main = Effect.gen(function* () {
 
   app.on("before-quit", () => {
     setAppQuitting()
+    stopSystemProxyWatcher()
     void stopSidecars()
   })
 
   app.on("will-quit", () => {
     setAppQuitting()
+    stopSystemProxyWatcher()
     void stopSidecars()
   })
 
@@ -359,6 +364,7 @@ const main = Effect.gen(function* () {
       }),
     )
     server = listener
+    setSidecarProxyUpdater((env) => listener.updateProxy(env))
     yield* Deferred.succeed(serverReady, {
       url,
       username: "opencode",

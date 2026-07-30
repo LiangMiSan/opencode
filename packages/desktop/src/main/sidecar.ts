@@ -1,5 +1,6 @@
 import * as http from "node:http"
 import * as tls from "node:tls"
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -19,7 +20,13 @@ type StartCommand = {
 }
 
 type StopCommand = { type: "stop" }
-type SidecarCommand = StartCommand | StopCommand
+
+type UpdateProxyCommand = {
+  type: "update-proxy"
+  env: Record<string, string>
+}
+
+type SidecarCommand = StartCommand | StopCommand | UpdateProxyCommand
 
 type SidecarMessage =
   | { type: "ready" }
@@ -45,6 +52,10 @@ parentPort.on("message", (event) => {
     void stop()
     return
   }
+  if (command.type === "update-proxy") {
+    applyProxyUpdate(command.env)
+    return
+  }
   void start(command)
 })
 
@@ -53,7 +64,7 @@ async function start(command: StartCommand) {
     prepareSidecarEnv(command.password, command.userDataPath)
     ensureLoopbackNoProxy()
     useSystemCertificates()
-    useEnvProxy()
+    applyEnvProxy()
     const { Server } = await import("virtual:opencode-server")
 
     listener = await Server.listen({
@@ -119,18 +130,49 @@ function useSystemCertificates() {
   }
 }
 
-function useEnvProxy() {
+function applyEnvProxy() {
+  // Route both Node's http module and fetch (undici) through HTTP_PROXY/HTTPS_PROXY/NO_PROXY.
+  // fetch needs an explicit EnvHttpProxyAgent because NODE_USE_ENV_PROXY only covers startup
+  // and http.setGlobalProxyFromEnv only affects the http module.
   try {
     ;(http as NodeHttpWithEnvProxy).setGlobalProxyFromEnv()
   } catch (error) {
-    console.warn("failed to load proxy environment", error)
+    console.warn("failed to load http proxy environment", error)
+  }
+  try {
+    setGlobalDispatcher(new EnvHttpProxyAgent())
+  } catch (error) {
+    console.warn("failed to set undici proxy dispatcher", error)
+  }
+}
+
+function applyProxyUpdate(env: Record<string, string>) {
+  // Live proxy update from the main process — merge the new env, then re-seed both the
+  // http module and the undici dispatcher so fetch honours the new proxy immediately.
+  try {
+    for (const [key, value] of Object.entries(env)) {
+      if (value === "") delete process.env[key]
+      else process.env[key] = value
+    }
+    ensureLoopbackNoProxy()
+    applyEnvProxy()
+  } catch (error) {
+    console.warn("failed to apply proxy update", error)
   }
 }
 
 function parseCommand(value: unknown): SidecarCommand | undefined {
   if (!value || typeof value !== "object") return
-  const command = value as Partial<StartCommand | StopCommand>
+  const command = value as Partial<StartCommand | StopCommand | UpdateProxyCommand>
   if (command.type === "stop") return { type: "stop" }
+  if (command.type === "update-proxy") {
+    if (!command.env || typeof command.env !== "object") return
+    const env: Record<string, string> = {}
+    for (const [key, val] of Object.entries(command.env)) {
+      if (typeof val === "string") env[key] = val
+    }
+    return { type: "update-proxy", env }
+  }
   if (command.type !== "start") return
   if (typeof command.hostname !== "string") return
   if (typeof command.port !== "number") return

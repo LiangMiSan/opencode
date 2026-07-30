@@ -14,7 +14,10 @@ type SidecarMessage =
   | { type: "stopped" }
   | { type: "error"; error: { message: string; stack?: string } }
 
-export type SidecarListener = { stop: () => Promise<void> }
+export type SidecarListener = {
+  stop: () => Promise<void>
+  updateProxy: (env: Record<string, string>) => void
+}
 
 const SIDECAR_SERVICE_NAME = "opencode server"
 const SIDECAR_START_STALL_TIMEOUT = 60_000
@@ -175,6 +178,10 @@ export async function spawnLocalServer(
           }),
         ])
         return stopping
+      },
+      updateProxy: (env: Record<string, string>) => {
+        if (exited) return
+        child.postMessage({ type: "update-proxy", env })
       },
     },
     health: { wait },

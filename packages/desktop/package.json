@@ -31,7 +31,8 @@
     "electron-store": "11.0.2",
     "electron-updater": "6.8.9",
     "electron-window-state": "^5.0.3",
-    "marked": "^15"
+    "marked": "^15",
+    "undici": "^7.26.0"
   },
   "devDependencies": {
     "@actions/artifact": "4.0.0",
